@@ -32,10 +32,21 @@ app = FastAPI()
 ws = MangumWS(endpoint_url=os.getenv("APIGW_MANAGEMENT_URL"))
 
 # Mount local dev WebSocket endpoint (no-op in production)
+async def on_ws_connect(connection_id: str):
+    print(f"Connected: {connection_id}")
+
+async def on_ws_disconnect(connection_id: str):
+    print(f"Disconnected: {connection_id}")
+
 async def on_ws_message(connection_id: str, data: dict):
     # Your subscribe logic here
     pass
-ws.mount(app, path="/", on_message=on_ws_message)
+
+ws.mount(app, path="/",
+    on_connect=on_ws_connect,
+    on_disconnect=on_ws_disconnect,
+    on_message=on_ws_message,
+)
 
 # --- Internal routes (hit via Mangum in prod, or local WS in dev) ---
 
@@ -102,9 +113,17 @@ Send `data` (dict or string) to all `connection_ids`. Returns the set of gone (d
 
 Send to a single connection. Returns `False` if the connection is gone.
 
-### `ws.mount(app, path="/", *, on_message=None)`
+### `ws.mount(app, path="/", *, on_connect=None, on_disconnect=None, on_message=None)`
 
-Mount a WebSocket endpoint on the FastAPI app for local development. No-op in production. `on_message` is an optional `async` callback `(connection_id, json_data) -> None`.
+Mount a WebSocket endpoint on the FastAPI app for local development. No-op in production (so you can call it unconditionally).
+
+The three callbacks mirror the API Gateway WebSocket lifecycle and the corresponding `/internal/websocket/*` routes:
+
+- **`on_connect(connection_id)`** -- called once when a client connects (matches `$connect`)
+- **`on_disconnect(connection_id)`** -- called when a client disconnects (matches `$disconnect`)
+- **`on_message(connection_id, json_data)`** -- called for each JSON message (matches custom routes like `sendmessage`)
+
+All callbacks are optional `async` functions.
 
 ### `ws.is_local`
 

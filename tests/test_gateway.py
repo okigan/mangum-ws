@@ -1,7 +1,12 @@
 """Tests for Gateway classes."""
 
+import json
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+from fastapi import FastAPI
+from starlette.testclient import TestClient
 
 from mangum_ws.gateway import LocalGateway, Gateway
 
@@ -75,3 +80,113 @@ def test_register_generates_id():
     ws = MagicMock()
     cid = gw.register("", ws)
     assert cid.startswith("local_")
+
+
+# ── LocalGateway.mount() lifecycle tests ─────────────────────
+
+
+def test_mount_local_ws_lifecycle_callbacks():
+    """on_connect, on_message, on_disconnect are called in order."""
+    log: list[str] = []
+
+    async def on_connect(cid: str) -> None:
+        log.append(f"connect:{cid}")
+
+    async def on_disconnect(cid: str) -> None:
+        log.append(f"disconnect:{cid}")
+
+    async def on_message(cid: str, data: dict) -> None:
+        log.append(f"message:{cid}:{data}")
+
+    app = FastAPI()
+    gw = LocalGateway()
+    gw.mount(app, path="/ws", on_connect=on_connect, on_disconnect=on_disconnect, on_message=on_message)
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"event_id": "e1"}))
+
+    # Verify lifecycle order
+    assert len(log) == 3
+    assert log[0].startswith("connect:local_")
+    assert "event_id" in log[1]
+    assert log[2].startswith("disconnect:local_")
+
+    # All three callbacks received the same connection_id
+    cid = log[0].split(":", 1)[1]
+    assert log[2] == f"disconnect:{cid}"
+
+
+def test_mount_local_ws_connection_id_stable():
+    """Connection ID is assigned once and reused for all messages."""
+    cids: list[str] = []
+
+    async def on_message(cid: str, data: dict) -> None:
+        cids.append(cid)
+
+    app = FastAPI()
+    gw = LocalGateway()
+    gw.mount(app, path="/ws", on_message=on_message)
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"a": 1}))
+        ws.send_text(json.dumps({"a": 2}))
+        ws.send_text(json.dumps({"a": 3}))
+
+    assert len(cids) == 3
+    assert cids[0] == cids[1] == cids[2]
+
+
+def test_mount_local_ws_server_push():
+    """Server can push messages to the client via the gateway."""
+    received: list[str] = []
+
+    async def on_message(cid: str, data: dict) -> None:
+        # Echo back via gateway
+        await gw.send_to_connection(cid, json.dumps({"echo": data}))
+
+    app = FastAPI()
+    gw = LocalGateway()
+    gw.mount(app, path="/ws", on_message=on_message)
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"hello": "world"}))
+        resp = ws.receive_text()
+        received.append(resp)
+
+    assert len(received) == 1
+    assert json.loads(received[0]) == {"echo": {"hello": "world"}}
+
+
+def test_mount_local_ws_no_callbacks():
+    """mount() works fine with no callbacks at all."""
+    app = FastAPI()
+    gw = LocalGateway()
+    gw.mount(app, path="/ws")
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"ping": True}))
+    # No error means success
+
+
+def test_mount_local_ws_invalid_json_skipped():
+    """Non-JSON messages are silently skipped, not passed to on_message."""
+    messages: list[dict] = []
+
+    async def on_message(cid: str, data: dict) -> None:
+        messages.append(data)
+
+    app = FastAPI()
+    gw = LocalGateway()
+    gw.mount(app, path="/ws", on_message=on_message)
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text("not json!!!")
+        ws.send_text(json.dumps({"valid": True}))
+
+    assert len(messages) == 1
+    assert messages[0] == {"valid": True}

@@ -1,13 +1,13 @@
 # mangum-ws
 
-WebSocket support for [Mangum](https://github.com/jordanerber/mangum) — run FastAPI behind AWS API Gateway WebSocket API on Lambda.
+WebSocket support for [Mangum](https://github.com/jordanerber/mangum) -- run FastAPI behind AWS API Gateway WebSocket API on Lambda.
 
 ## Problem
 
-Mangum doesn't natively support API Gateway WebSocket API events (`$connect`, `$disconnect`, custom routes). This library bridges that gap with:
+Mangum doesn't natively support API Gateway WebSocket API events (`$connect`, `$disconnect`, custom routes). This library bridges that gap with a single `MangumWS` object that handles both directions:
 
-1. **`WebSocketHandler`** — a Mangum custom handler that converts WebSocket events into HTTP POST requests to your FastAPI routes
-2. **`Gateway`** — a unified interface for sending messages back to connected clients (via boto3 in production, or in-memory for local dev)
+- **Inbound**: converts API Gateway WebSocket events into HTTP POST requests to your FastAPI routes (via a Mangum custom handler)
+- **Outbound**: sends messages back to connected clients (via boto3 in production, or in-memory for local dev)
 
 ## Install
 
@@ -24,20 +24,20 @@ import json
 import os
 from fastapi import FastAPI, Request
 from mangum import Mangum
-from mangum_ws import WebSocketHandler, Gateway
+from mangum_ws import MangumWS
 
 app = FastAPI()
 
-# Gateway: auto-selects AWS or local based on endpoint URL
-gw = Gateway.auto(endpoint_url=os.getenv("APIGW_MANAGEMENT_URL"))
+# One object, auto-selects AWS or local based on endpoint URL
+ws = MangumWS(endpoint_url=os.getenv("APIGW_MANAGEMENT_URL"))
 
 # Mount local dev WebSocket endpoint (no-op in production)
 async def on_ws_message(connection_id: str, data: dict):
     # Your subscribe logic here
     pass
-gw.mount(app, path="/", on_message=on_ws_message)
+ws.mount(app, path="/", on_message=on_ws_message)
 
-# --- Internal routes (hit by WebSocketHandler via Mangum) ---
+# --- Internal routes (hit via Mangum in prod, or local WS in dev) ---
 
 @app.post("/internal/websocket/connect/{connection_id}")
 async def ws_connect(connection_id: str):
@@ -45,7 +45,7 @@ async def ws_connect(connection_id: str):
 
 @app.post("/internal/websocket/disconnect/{connection_id}")
 async def ws_disconnect(connection_id: str):
-    pass  # Connection closed — clean up subscriptions
+    pass  # Connection closed -- clean up subscriptions
 
 @app.post("/internal/websocket/sendmessage/{connection_id}")
 async def ws_message(connection_id: str, request: Request):
@@ -55,12 +55,12 @@ async def ws_message(connection_id: str, request: Request):
 # --- Sending messages back to clients ---
 
 async def notify(connection_ids: set[str], payload: dict):
-    gone = await gw.send(connection_ids=connection_ids, data=payload)
+    gone = await ws.send(connection_ids=connection_ids, data=payload)
     # Remove gone connection IDs from your subscription store
     return gone
 
-# Lambda handler
-handler = Mangum(app, custom_handlers=[WebSocketHandler])
+# Lambda handler -- ws.handler is the Mangum custom handler class
+handler = Mangum(app, custom_handlers=[ws.handler])
 ```
 
 ## How It Works
@@ -77,42 +77,38 @@ API Gateway WebSocket routes are mapped to internal HTTP POST routes:
 
 ### Gateway
 
-`Gateway.auto()` picks the right implementation:
+`MangumWS` auto-selects the right gateway backend:
 
-- **`AwsGateway`** — wraps `boto3.client("apigatewaymanagementapi")` to push messages via `post_to_connection`
-- **`LocalGateway`** — holds in-memory WebSocket references; mounts a real `@app.websocket()` endpoint for local testing
+- **`AwsGateway`** -- wraps `boto3.client("apigatewaymanagementapi")` to push messages via `post_to_connection`
+- **`LocalGateway`** -- holds in-memory WebSocket references; mounts a real `@app.websocket()` endpoint for local testing
 
 Both return gone connection IDs from `send()` so you can clean up your subscription store.
 
 ## API
 
-### `WebSocketHandler`
+### `MangumWS(endpoint_url=None)`
 
-Drop-in Mangum custom handler. Pass it to `Mangum(app, custom_handlers=[WebSocketHandler])`.
+Main entry point. Returns an `AwsGateway`-backed instance if `endpoint_url` is provided, `LocalGateway`-backed otherwise.
 
-### `Gateway.auto(endpoint_url=None) → Gateway`
+### `ws.handler`
 
-Factory that returns `AwsGateway` if `endpoint_url` is provided, `LocalGateway` otherwise.
+The Mangum custom handler class. Pass to `Mangum(app, custom_handlers=[ws.handler])`.
 
-### `gateway.send(connection_ids, data) → set[str]`
+### `ws.send(connection_ids, data) -> set[str]`
 
 Send `data` (dict or string) to all `connection_ids`. Returns the set of gone (disconnected) connection IDs.
 
-### `gateway.send_to_connection(connection_id, data) → bool`
+### `ws.send_to_connection(connection_id, data) -> bool`
 
 Send to a single connection. Returns `False` if the connection is gone.
 
-### `gateway.mount(app, path="/", *, on_message=None)`
+### `ws.mount(app, path="/", *, on_message=None)`
 
-Mount a WebSocket endpoint on the FastAPI app for local development. No-op on non-local gateways (e.g. `AwsGateway`), so it can be called unconditionally. `on_message` is an optional `async` callback `(connection_id, json_data) → None`.
+Mount a WebSocket endpoint on the FastAPI app for local development. No-op in production. `on_message` is an optional `async` callback `(connection_id, json_data) -> None`.
 
-### `local_gateway.register(connection_id, ws) → str`
+### `ws.is_local`
 
-Register a WebSocket under a connection ID (generates one if empty).
-
-### `local_gateway.unregister_ws(ws)`
-
-Remove a WebSocket from all connection mappings.
+`True` when backed by `LocalGateway` (local dev), `False` when backed by `AwsGateway`.
 
 ## License
 

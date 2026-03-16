@@ -17,6 +17,11 @@ import fastapi
 
 logger = logging.getLogger(__name__)
 
+# Callback type aliases for readability
+ConnectCallback = Callable[[str], Awaitable[None]]
+DisconnectCallback = Callable[[str], Awaitable[None]]
+MessageCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+
 
 class Gateway:
     """Abstract base for pushing messages to WebSocket connections."""
@@ -54,12 +59,21 @@ class Gateway:
         app: fastapi.FastAPI,
         path: str = "/",
         *,
-        on_message: Optional[Callable[[str, dict[str, Any]], Awaitable[None]]] = None,
+        on_connect: Optional[ConnectCallback] = None,
+        on_disconnect: Optional[DisconnectCallback] = None,
+        on_message: Optional[MessageCallback] = None,
     ) -> None:
         """Mount a local-dev WebSocket endpoint.
 
         No-op on non-local gateways (e.g. ``AwsGateway``), so callers
         can invoke this unconditionally without an ``if gw.is_local`` guard.
+
+        The three callbacks mirror the API Gateway WebSocket lifecycle
+        and correspond to the three ``/internal/websocket/*`` routes:
+
+        - *on_connect(connection_id)*  – called when a client connects
+        - *on_disconnect(connection_id)* – called when a client disconnects
+        - *on_message(connection_id, json_data)* – called for each message
         """
         pass  # non-local gateways: nothing to mount
 
@@ -137,48 +151,55 @@ class LocalGateway(Gateway):
         app: fastapi.FastAPI,
         path: str = "/",
         *,
-        on_message: Optional[Callable[[str, dict[str, Any]], Awaitable[None]]] = None,
+        on_connect: Optional[ConnectCallback] = None,
+        on_disconnect: Optional[DisconnectCallback] = None,
+        on_message: Optional[MessageCallback] = None,
     ) -> None:
         """Mount a real WebSocket endpoint on *app* that bridges browser
-        WebSocket connections to the internal HTTP route convention used
-        by ``WebSocketHandler``.
+        connections to the same lifecycle as API Gateway WebSocket API.
 
-        *on_message* is an optional async callback invoked with
-        ``(connection_id, parsed_json)`` for each incoming message.  If not
-        provided, messages are forwarded to FastAPI's internal routes via
-        ``TestClient``-style dispatch (you usually don't need this — just
-        register your ``/internal/websocket/…`` routes on the app).
+        The three callbacks mirror the ``/internal/websocket/*`` routes
+        that ``WebSocketHandler`` dispatches to in production:
+
+        - *on_connect(connection_id)* -- ``$connect``
+        - *on_disconnect(connection_id)* -- ``$disconnect``
+        - *on_message(connection_id, json_data)* -- custom route (e.g. ``sendmessage``)
+
+        Follows FastAPI's recommended WebSocket pattern: accept once,
+        catch ``WebSocketDisconnect``, clean up in handler.
         """
         gw = self  # capture for closure
 
         @app.websocket(path)
         async def _local_ws_endpoint(websocket: fastapi.WebSocket) -> None:
             await websocket.accept()
-            local_cids: list[str] = []
+            # Generate a stable connection ID for this WebSocket -- once,
+            # just like API Gateway assigns one at $connect time.
+            connection_id = gw.register("", websocket)
+            logger.debug("Local WS connected: %s", connection_id)
+
+            if on_connect is not None:
+                await on_connect(connection_id)
+
             try:
                 while True:
                     data = await websocket.receive_text()
-                    logger.debug("Local WS received: %s", data)
-                    await websocket.send_text(
-                        json.dumps({"type": "info", "message": "Message received", "data": data})
-                    )
+                    logger.debug("Local WS received from %s: %s", connection_id, data)
                     try:
                         json_data = json.loads(data)
                     except (json.JSONDecodeError, TypeError):
                         continue
 
-                    cid = gw.register("", websocket)
-                    local_cids.append(cid)
-
                     if on_message is not None:
-                        await on_message(cid, json_data)
+                        await on_message(connection_id, json_data)
             except fastapi.WebSocketDisconnect:
-                logger.debug("Local WS disconnected")
+                logger.debug("Local WS disconnected: %s", connection_id)
             except Exception as exc:
-                logger.error("Local WS error: %s", exc)
+                logger.error("Local WS error on %s: %s", connection_id, exc)
             finally:
+                if on_disconnect is not None:
+                    try:
+                        await on_disconnect(connection_id)
+                    except Exception:
+                        logger.exception("Error in on_disconnect for %s", connection_id)
                 gw.unregister_ws(websocket)
-                try:
-                    await websocket.close()
-                except Exception:
-                    pass

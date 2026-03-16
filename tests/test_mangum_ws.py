@@ -48,5 +48,11 @@ def test_mount_noop_when_not_local():
     from fastapi import FastAPI
     app = FastAPI()
     ws = MangumWS(endpoint_url="https://example.com")
-    # Should not raise
-    ws.mount(app, path="/ws")
+    # Should not raise -- all callbacks are accepted but ignored
+    async def noop_connect(cid: str): pass
+    async def noop_disconnect(cid: str): pass
+    async def noop_message(cid: str, data: dict): pass
+    ws.mount(app, path="/ws",
+             on_connect=noop_connect,
+             on_disconnect=noop_disconnect,
+             on_message=noop_message)

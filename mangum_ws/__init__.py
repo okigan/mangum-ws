@@ -54,9 +54,16 @@ class MangumWS:
         app: fastapi.FastAPI,
         path: str = "/",
         *,
+        on_connect: Optional[Callable[[str], Awaitable[None]]] = None,
+        on_disconnect: Optional[Callable[[str], Awaitable[None]]] = None,
         on_message: Optional[Callable[[str, dict[str, Any]], Awaitable[None]]] = None,
     ) -> None:
-        self._gateway.mount(app, path=path, on_message=on_message)
+        self._gateway.mount(
+            app, path=path,
+            on_connect=on_connect,
+            on_disconnect=on_disconnect,
+            on_message=on_message,
+        )
 
 
 __all__ = [

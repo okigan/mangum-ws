@@ -56,9 +56,12 @@ class Gateway:
         *,
         on_message: Optional[Callable[[str, dict[str, Any]], Awaitable[None]]] = None,
     ) -> None:
-        """Mount a local-dev WebSocket endpoint.  Only available on
-        ``LocalGateway``."""
-        raise NotImplementedError("mount() is only available on LocalGateway")
+        """Mount a local-dev WebSocket endpoint.
+
+        No-op on non-local gateways (e.g. ``AwsGateway``), so callers
+        can invoke this unconditionally without an ``if gw.is_local`` guard.
+        """
+        pass  # non-local gateways: nothing to mount
 
 
 class AwsGateway(Gateway):

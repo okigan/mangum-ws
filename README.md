@@ -31,12 +31,11 @@ app = FastAPI()
 # Gateway: auto-selects AWS or local based on endpoint URL
 gw = Gateway.auto(endpoint_url=os.getenv("APIGW_MANAGEMENT_URL"))
 
-# For local dev, mount a real WebSocket endpoint
-if gw.is_local:
-    async def on_ws_message(connection_id: str, data: dict):
-        # Your subscribe logic here
-        pass
-    gw.mount(app, path="/", on_message=on_ws_message)
+# Mount local dev WebSocket endpoint (no-op in production)
+async def on_ws_message(connection_id: str, data: dict):
+    # Your subscribe logic here
+    pass
+gw.mount(app, path="/", on_message=on_ws_message)
 
 # --- Internal routes (hit by WebSocketHandler via Mangum) ---
 
@@ -103,9 +102,9 @@ Send `data` (dict or string) to all `connection_ids`. Returns the set of gone (d
 
 Send to a single connection. Returns `False` if the connection is gone.
 
-### `local_gateway.mount(app, path="/", *, on_message=None)`
+### `gateway.mount(app, path="/", *, on_message=None)`
 
-Mount a WebSocket endpoint on the FastAPI app for local development. `on_message` is an optional `async` callback `(connection_id, json_data) → None`.
+Mount a WebSocket endpoint on the FastAPI app for local development. No-op on non-local gateways (e.g. `AwsGateway`), so it can be called unconditionally. `on_message` is an optional `async` callback `(connection_id, json_data) → None`.
 
 ### `local_gateway.register(connection_id, ws) → str`
 

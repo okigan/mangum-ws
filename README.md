@@ -2,6 +2,15 @@
 
 WebSocket support for [Mangum](https://github.com/jordanerber/mangum) -- run FastAPI behind AWS API Gateway WebSocket API on Lambda.
 
+**Try it now** — a working chat demo in ~40 lines:
+
+```bash
+git clone https://github.com/okigan/mangum-ws.git && cd mangum-ws
+uv sync --group dev
+uv run python examples/demochat.py
+# Open http://localhost:8000 in two browser tabs
+```
+
 ## Problem
 
 Mangum doesn't natively support API Gateway WebSocket API events (`$connect`, `$disconnect`, custom routes). This library bridges that gap with a single `MangumWS` object that handles both directions:
@@ -68,24 +77,9 @@ handler = Mangum(app, custom_handlers=[ws.handler])
 
 ## How It Works
 
-### Route Mapping
+In production, API Gateway WebSocket API manages connections and invokes Lambda for each event (`$connect`, `$disconnect`, `sendmessage`). The library converts these into FastAPI route calls via a Mangum custom handler, and sends messages back via `boto3`.
 
-API Gateway WebSocket routes are mapped to internal HTTP POST routes:
-
-| API Gateway Route | FastAPI Route |
-|---|---|
-| `$connect` | `POST /internal/websocket/connect/{connectionId}` |
-| `$disconnect` | `POST /internal/websocket/disconnect/{connectionId}` |
-| `sendmessage` | `POST /internal/websocket/sendmessage/{connectionId}` |
-
-### Gateway
-
-`MangumWS` auto-selects the right gateway backend:
-
-- **`AwsGateway`** -- wraps `boto3.client("apigatewaymanagementapi")` to push messages via `post_to_connection`
-- **`LocalGateway`** -- holds in-memory WebSocket references; mounts a real `@app.websocket()` endpoint for local testing
-
-Both return gone connection IDs from `send()` so you can clean up your subscription store.
+For local development, `ws.mount()` creates a real `@app.websocket()` endpoint that reuses the same handlers — so your code works identically in both environments.
 
 ## API
 
@@ -126,16 +120,6 @@ Send to a single connection. Returns `False` if the connection is gone.
 ### `ws.is_local`
 
 `True` when backed by `LocalGateway` (local dev), `False` when backed by `AwsGateway`.
-
-## Demo
-
-A chat room demo is included in [`examples/demochat.py`](examples/demochat.py):
-
-```bash
-uv run python examples/demochat.py
-```
-
-Open http://localhost:8000 in two browser tabs and chat between them.
 
 ## License
 

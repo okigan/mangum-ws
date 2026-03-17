@@ -24,15 +24,15 @@ Mangum doesn't natively support this. mangum-ws bridges the gap with a single `M
 ## Install
 
 ```bash
-pip install mangum-ws
+uv add mangum-ws
 # With AWS support (boto3):
-pip install mangum-ws[aws]
+uv add "mangum-ws[aws]"
 ```
 
 For local development with `ws.mount()`, uvicorn needs a WebSocket library:
 
 ```bash
-pip install uvicorn[standard]
+uv add "uvicorn[standard]"
 ```
 
 ## Quick Start

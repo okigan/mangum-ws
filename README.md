@@ -17,6 +17,12 @@ pip install mangum-ws
 pip install mangum-ws[aws]
 ```
 
+For local development with `ws.mount()`, uvicorn needs a WebSocket library:
+
+```bash
+pip install uvicorn[standard]
+```
+
 ## Quick Start
 
 ```python
@@ -120,6 +126,16 @@ Send to a single connection. Returns `False` if the connection is gone.
 ### `ws.is_local`
 
 `True` when backed by `LocalGateway` (local dev), `False` when backed by `AwsGateway`.
+
+## Demo
+
+A chat room demo is included in [`examples/demochat.py`](examples/demochat.py):
+
+```bash
+uv run python examples/demochat.py
+```
+
+Open http://localhost:8000 in two browser tabs and chat between them.
 
 ## License
 

@@ -2,7 +2,7 @@
 
 WebSocket support for [Mangum](https://github.com/Kludex/mangum) — use FastAPI WebSockets on AWS Lambda behind API Gateway WebSocket API.
 
-**Try it now** — a working chat demo in ~40 lines:
+**Try it now** — a working chat demo:
 
 ```bash
 git clone https://github.com/okigan/mangum-ws.git && cd mangum-ws

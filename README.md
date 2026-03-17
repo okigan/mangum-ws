@@ -127,3 +127,7 @@ Send to a single connection. Returns `False` if the connection is gone.
 ## License
 
 MIT
+
+---
+
+[![Star History Chart](https://api.star-history.com/svg?repos=okigan/mangum-ws&type=Date)](https://star-history.com/#okigan/mangum-ws&Date)

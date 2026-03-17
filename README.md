@@ -1,6 +1,6 @@
 # mangum-ws
 
-WebSocket support for [Mangum](https://github.com/jordanerber/mangum) -- run FastAPI behind AWS API Gateway WebSocket API on Lambda.
+WebSocket support for [Mangum](https://github.com/Kludex/mangum) — use FastAPI WebSockets on AWS Lambda behind API Gateway WebSocket API.
 
 **Try it now** — a working chat demo in ~40 lines:
 
@@ -13,10 +13,13 @@ uv run python examples/demochat.py
 
 ## Problem
 
-Mangum doesn't natively support API Gateway WebSocket API events (`$connect`, `$disconnect`, custom routes). This library bridges that gap with a single `MangumWS` object that handles both directions:
+[Mangum](https://github.com/Kludex/mangum) lets you run ASGI apps (like FastAPI) on AWS Lambda behind API Gateway. It handles HTTP requests well, but **API Gateway WebSocket API** works differently: there's no persistent server — each WebSocket event (`$connect`, `$disconnect`, messages) triggers a separate Lambda invocation, and sending messages back requires calling the API Gateway Management API via HTTP.
 
-- **Inbound**: converts API Gateway WebSocket events into HTTP POST requests to your FastAPI routes (via a Mangum custom handler)
-- **Outbound**: sends messages back to connected clients (via boto3 in production, or in-memory for local dev)
+Mangum doesn't natively support this. mangum-ws bridges the gap with a single `MangumWS` object:
+
+- **Inbound** (Lambda): converts API Gateway WebSocket events into FastAPI route calls via a Mangum custom handler
+- **Outbound** (Lambda): sends messages back to clients via `boto3` `post_to_connection`
+- **Local dev**: mounts a real FastAPI WebSocket endpoint so the same code works without AWS
 
 ## Install
 

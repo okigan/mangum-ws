@@ -20,9 +20,8 @@ pip install mangum-ws[aws]
 ## Quick Start
 
 ```python
-import json
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from mangum import Mangum
 from mangum_ws import MangumWS
 
@@ -31,46 +30,33 @@ app = FastAPI()
 # One object, auto-selects AWS or local based on endpoint URL
 ws = MangumWS(endpoint_url=os.getenv("APIGW_MANAGEMENT_URL"))
 
-# Mount local dev WebSocket endpoint (no-op in production)
-async def on_ws_connect(connection_id: str):
+# Register WebSocket lifecycle handlers (write once, used everywhere)
+@ws.on_connect
+async def handle_connect(connection_id: str):
     print(f"Connected: {connection_id}")
 
-async def on_ws_disconnect(connection_id: str):
+@ws.on_disconnect
+async def handle_disconnect(connection_id: str):
     print(f"Disconnected: {connection_id}")
 
-async def on_ws_message(connection_id: str, data: dict):
-    # Your subscribe logic here
+@ws.on_message
+async def handle_message(connection_id: str, data: dict):
+    # Subscribe this connection to a topic, etc.
     pass
 
-ws.mount(app, path="/",
-    on_connect=on_ws_connect,
-    on_disconnect=on_ws_disconnect,
-    on_message=on_ws_message,
-)
+# Standard FastAPI: include the router (generates /internal/websocket/* routes)
+app.include_router(ws.router)
 
-# --- Internal routes (hit via Mangum in prod, or local WS in dev) ---
+# Local dev: mount a real WebSocket endpoint (no-op in production)
+ws.mount(app)
 
-@app.post("/internal/websocket/connect/{connection_id}")
-async def ws_connect(connection_id: str):
-    pass  # Connection opened
-
-@app.post("/internal/websocket/disconnect/{connection_id}")
-async def ws_disconnect(connection_id: str):
-    pass  # Connection closed -- clean up subscriptions
-
-@app.post("/internal/websocket/sendmessage/{connection_id}")
-async def ws_message(connection_id: str, request: Request):
-    body = json.loads(await request.body())
-    # Subscribe this connection to a topic, etc.
-
-# --- Sending messages back to clients ---
-
+# Sending messages back to clients
 async def notify(connection_ids: set[str], payload: dict):
     gone = await ws.send(connection_ids=connection_ids, data=payload)
     # Remove gone connection IDs from your subscription store
     return gone
 
-# Lambda handler -- ws.handler is the Mangum custom handler class
+# Lambda handler
 handler = Mangum(app, custom_handlers=[ws.handler])
 ```
 
@@ -99,7 +85,25 @@ Both return gone connection IDs from `send()` so you can clean up your subscript
 
 ### `MangumWS(endpoint_url=None)`
 
-Main entry point. Returns an `AwsGateway`-backed instance if `endpoint_url` is provided, `LocalGateway`-backed otherwise.
+Main entry point. Uses `AwsGateway` (boto3) if `endpoint_url` is provided, `LocalGateway` (in-memory) otherwise.
+
+### `@ws.on_connect` / `@ws.on_disconnect` / `@ws.on_message`
+
+Decorators to register WebSocket lifecycle handlers. Each handler is written once and used in both Lambda (`ws.router`) and local dev (`ws.mount`):
+
+- **`@ws.on_connect`** — `async def(connection_id: str) -> None` — called on `$connect`
+- **`@ws.on_disconnect`** — `async def(connection_id: str) -> None` — called on `$disconnect`
+- **`@ws.on_message`** — `async def(connection_id: str, data: dict) -> None` — called on custom routes (e.g. `sendmessage`)
+
+All are optional.
+
+### `ws.router`
+
+A `fastapi.APIRouter` containing `POST /internal/websocket/{connect,disconnect,sendmessage}/{connection_id}` routes that dispatch to your registered handlers. Add with `app.include_router(ws.router)`.
+
+### `ws.mount(app, path="/")`
+
+Mount a real `@app.websocket()` endpoint for local development, reusing the registered handlers. No-op in production (so you can call it unconditionally).
 
 ### `ws.handler`
 
@@ -112,18 +116,6 @@ Send `data` (dict or string) to all `connection_ids`. Returns the set of gone (d
 ### `ws.send_to_connection(connection_id, data) -> bool`
 
 Send to a single connection. Returns `False` if the connection is gone.
-
-### `ws.mount(app, path="/", *, on_connect=None, on_disconnect=None, on_message=None)`
-
-Mount a WebSocket endpoint on the FastAPI app for local development. No-op in production (so you can call it unconditionally).
-
-The three callbacks mirror the API Gateway WebSocket lifecycle and the corresponding `/internal/websocket/*` routes:
-
-- **`on_connect(connection_id)`** -- called once when a client connects (matches `$connect`)
-- **`on_disconnect(connection_id)`** -- called when a client disconnects (matches `$disconnect`)
-- **`on_message(connection_id, json_data)`** -- called for each JSON message (matches custom routes like `sendmessage`)
-
-All callbacks are optional `async` functions.
 
 ### `ws.is_local`
 

@@ -130,4 +130,4 @@ MIT
 
 ---
 
-[![Star History Chart](https://api.star-history.com/svg?repos=okigan/mangum-ws&type=Date)](https://star-history.com/#okigan/mangum-ws&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=okigan/mangum-ws)](https://star-history.com/#okigan/mangum-ws)

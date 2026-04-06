@@ -1,6 +1,6 @@
 [project]
 name = "mangum-ws"
-version = "0.1.1"
+version = "0.1.2"
 description = "WebSocket support for Mangum (AWS API Gateway WebSocket API → FastAPI)"
 readme = "README.md"
 license = "MIT"
